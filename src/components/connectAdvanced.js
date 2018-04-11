@@ -151,8 +151,11 @@ export default function connectAdvanced(
         // To handle the case where a child component may have triggered a state change by
         // dispatching an action in its componentWillMount, we have to re-run the select and maybe
         // re-render.
+        // 在这里执行第一次的监听 这里仅仅还只是加入队列中 并没有执行
         this.subscription.trySubscribe()
+        // 这里计算一次返回最新的this.selector.shouldComponentUpdate
         this.selector.run(this.props)
+        // 如果当前需要更新的话 采取强制更新
         if (this.selector.shouldComponentUpdate) this.forceUpdate()
       }
 
@@ -196,6 +199,10 @@ export default function connectAdvanced(
 
         // parentSub's source should match where store came from: props vs. context. A component
         // connected to the store via props shouldn't use subscription from context, or vice versa.
+        // 这里有一点需要注意的就是propsMode 如果有数据的话 会从props取 没有则从context取 正常情况下
+        // 简单来说 我们知道context会被继承下去 如果这里有获取到数据的话 就会直接使用原有的 而不是现有的
+        // 并不是每次每个组件都使用了一个新的监听 而是从父级开始 如果父有了一个监听 就使用父的 当我这边去进行改变的时候
+        // 默认其实会触发父的监听 在由父来回调当前页面的监听函数 做到尽量少的创建一个监听 实现公用
         const parentSub = (this.propsMode ? this.props : this.context)[subscriptionKey]
         this.subscription = new Subscription(this.store, parentSub, this.onStateChange.bind(this))
 
@@ -205,16 +212,23 @@ export default function connectAdvanced(
         // replacing it with a no-op on unmount. This can probably be avoided if Subscription's
         // listeners logic is changed to not call listeners that have been unsubscribed in the
         // middle of the notification loop.
+        // 这里绑定监听需要用到的函数
         this.notifyNestedSubs = this.subscription.notifyNestedSubs.bind(this.subscription)
       }
 
       onStateChange() {
+        // 这里执行计算出最新的shouldComponentUpdate
         this.selector.run(this.props)
-
+        // 如果当前为false则执行监听 这里的意思是说 如果当前自身组件并不需要更新的话 就调用所有的子级回调 
+        // 触发子级的onStateChange函数 让其判断自身下面是否需要更新 因为正常情况下的话 如果父级setState以后
+        // 所有的子级其实都会被更新到
         if (!this.selector.shouldComponentUpdate) {
           this.notifyNestedSubs()
         } else {
+          // 替换this.componentDidUpdate为自定义更新
+          // 在这里会重新触发子级的回调
           this.componentDidUpdate = this.notifyNestedSubsOnComponentDidUpdate
+          // 这里的setState其实是无意义的 等于this.forueUpdate
           this.setState(dummyState)
         }
       }
@@ -225,7 +239,9 @@ export default function connectAdvanced(
         // changes occur. Doing it this way vs having a permanent `componentDidUpdate` that does
         // a boolean check every time avoids an extra method call most of the time, resulting
         // in some perf boost.
+        // 重新赋值为空值 并且调用自身的子级监听
         this.componentDidUpdate = undefined
+        // 重新触发子级的回调
         this.notifyNestedSubs()
       }
 
@@ -267,6 +283,7 @@ export default function connectAdvanced(
     if (process.env.NODE_ENV !== 'production') {
       Connect.prototype.componentWillUpdate = function componentWillUpdate() {
         // We are hot reloading!
+        // 这里的话version就是更新的次数 当你每次热更新的时候 就会重新触发一次
         if (this.version !== version) {
           this.version = version
           this.initSelector()
